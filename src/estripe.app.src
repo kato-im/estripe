@@ -1,0 +1,13 @@
+{application, estripe,
+ [
+  {description, ""},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib,
+                  lhttpc
+                 ]},
+  {mod, {estripe_app, []}},
+  {env, []}
+ ]}.
