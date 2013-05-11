@@ -38,8 +38,12 @@ create_customer(Params) ->
         Body,
         ?HTTP_TIMEOUT
     ),
-    {ok, {{200, _}, _, Json}} = Res,
-    {ok, #customer{obj = jiffy:decode(Json)}}.
+    case Res of
+        {ok, {{200, _}, _, Json}} ->
+            {ok, #customer{obj = jiffy:decode(Json)}};
+        {ok, {{402, "Payment Required"}, _, Json}} ->
+            {error, jiffy:decode(Json)}
+    end.
 
 update_customer(CustomerId, Params) when is_binary(CustomerId) ->
     Body = form_urlencode(Params),
