@@ -8,6 +8,7 @@
 -export([cancel_subscription/2]).
 
 -export([last_charge/1]).
+-export([issue_refund/1]).
 -export([issue_refund/2]).
 
 -export([get_invoices/2]).
@@ -137,6 +138,16 @@ last_charge(CustomerId) ->
         Charges ->
             {ok, lists:last(Charges)}
     end.
+
+issue_refund(ChargeId) ->
+    Res = lhttpc:request(
+        "https://api.stripe.com/v1/charges/" ++ binary_to_list(ChargeId) ++ "/refund",
+        "POST",
+        [authorization()],
+        ?HTTP_TIMEOUT
+    ),
+    {ok, {{200, _}, _, Json}} = Res,
+    {ok, jiffy:decode(Json)}.
 
 issue_refund(ChargeId, RefundAmount) ->
     Body = form_urlencode([
