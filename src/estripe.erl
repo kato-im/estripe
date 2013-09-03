@@ -1,110 +1,122 @@
 -module(estripe).
 
--export([create_customer/1]).
+-export([create_customer/3]).
 -export([update_customer/2]).
 -export([delete_customer/1]).
 -export([get_customer/1]).
--export([update_subscription/2]).
--export([cancel_subscription/2]).
+-export([update_subscription/3, update_subscription/4]).
+-export([cancel_subscription/1]).
 
 -export([last_charge/1]).
 -export([issue_refund/1]).
 -export([issue_refund/2]).
 
--export([get_invoices/2]).
 -export([get_invoices/0]).
 -export([get_customer_invoices/1]).
--export([get_customer_invoices/3]).
 
 -export([customer_id/1]).
--export([active_card/1]).
--export([subscription/1]).
+-export([customer_active_card/1]).
+-export([customer_subscription/1]).
 
--record(customer, {obj}).
--record(subscription, {obj}).
--record(invoices, {obj}).
+-export([charge_amount/1]).
+-export([charge_id/1]).
 
 -define(HTTP_TIMEOUT, 10000).
+-define(CHARGES_PAGE_SIZE, 100).
 
 authorization() ->
     {ok, SK} = application:get_env(estripe, stripe_key),
     {<<"Authorization">>, <<"Bearer ", SK/binary>>}.
 
-create_customer(Params) ->
+handle_customer_response({ok, {{200, _}, _, Json}}) ->
+    {ok, jiffy:decode(Json)};
+handle_customer_response({ok, {{402, "Payment Required"}, _, _}}) ->
+    {error, payment_required};
+handle_customer_response({error, Error}) ->
+    {error, Error}.
+
+create_customer(Token, PlanId, Quantity) ->
+    Params = [
+        {<<"card">>, Token},
+        {<<"plan">>, PlanId},
+        {<<"quantity">>, list_to_binary(integer_to_list(Quantity))}
+    ],
     Body = form_urlencode(Params),
-    Res = lhttpc:request(
+    handle_customer_response(lhttpc:request(
         "https://api.stripe.com/v1/customers",
         "POST",
         [authorization()],
         Body,
         ?HTTP_TIMEOUT
-    ),
-    case Res of
-        {ok, {{200, _}, _, Json}} ->
-            {ok, #customer{obj = jiffy:decode(Json)}};
-        {ok, {{402, "Payment Required"}, _, Json}} ->
-            {error, jiffy:decode(Json)}
-    end.
+    )).
 
-update_customer(CustomerId, Params) when is_binary(CustomerId) ->
+update_customer(CustomerId, Token) when is_binary(CustomerId) ->
+    Params = [{<<"card">>, Token}],
     Body = form_urlencode(Params),
-    Res = lhttpc:request(
+    handle_customer_response(lhttpc:request(
         "https://api.stripe.com/v1/customers/" ++ binary_to_list(CustomerId),
         "POST",
         [authorization()],
         Body,
         ?HTTP_TIMEOUT
-    ),
-    case Res of
-        {ok, {{200, _}, _, Json}} ->
-            {ok, #customer{obj = jiffy:decode(Json)}};
-        {ok, {{402, "Payment Required"}, _, Json}} ->
-            {error, jiffy:decode(Json)}
-    end.
+    )).
 
 delete_customer(CustomerId) when is_binary(CustomerId) ->
-    Res = lhttpc:request(
+    handle_customer_response(lhttpc:request(
         "https://api.stripe.com/v1/customers/" ++ binary_to_list(CustomerId),
         "DELETE",
         [authorization()],
         ?HTTP_TIMEOUT
-    ),
-    {ok, {{200, _}, _, Json}} = Res,
-    {ok, #customer{obj = jiffy:decode(Json)}}.
+    )).
 
 get_customer(CustomerId) when is_binary(CustomerId) ->
-    Res = lhttpc:request(
+    handle_customer_response(lhttpc:request(
         "https://api.stripe.com/v1/customers/" ++ binary_to_list(CustomerId),
         "GET",
         [authorization()],
         ?HTTP_TIMEOUT
-    ),
-    {ok, {{200, _}, _, Json}} = Res,
-    {ok, #customer{obj = jiffy:decode(Json)}}.
+    )).
 
-update_subscription(CustomerId, Params) ->
+handle_subscription_response({ok, {{200, _}, _, Json}}) ->
+    {ok, jiffy:decode(Json)};
+handle_subscription_response({error, Error}) ->
+    {error, Error}.
+
+update_subscription(CustomerId, Token, PlanId, Quantity) ->
+    Params = [
+        {<<"card">>, Token},
+        {<<"plan">>, PlanId},
+        {<<"quantity">>, list_to_binary(integer_to_list(Quantity))}
+    ],
+    update_subscription_internal(CustomerId, Params).
+
+update_subscription(CustomerId, PlanId, Quantity) ->
+    Params = [
+        {<<"plan">>, PlanId},
+        {<<"quantity">>, list_to_binary(integer_to_list(Quantity))}
+    ],
+    update_subscription_internal(CustomerId, Params).
+
+update_subscription_internal(CustomerId, Params) ->
     Body = form_urlencode(Params),
-    Res = lhttpc:request(
+    handle_subscription_response(lhttpc:request(
         "https://api.stripe.com/v1/customers/" ++ binary_to_list(CustomerId) ++ "/subscription",
         "POST",
         [authorization()],
         Body,
         ?HTTP_TIMEOUT
-    ),
-    {ok, {{200, _}, _, Json}} = Res,
-    {ok, #subscription{obj = jiffy:decode(Json)}}.
+    )).
 
-cancel_subscription(CustomerId, Params) ->
+cancel_subscription(CustomerId) ->
+    Params = [],
     Body = form_urlencode(Params),
-    Res = lhttpc:request(
+    handle_subscription_response(lhttpc:request(
         "https://api.stripe.com/v1/customers/" ++ binary_to_list(CustomerId) ++ "/subscription",
         "DELETE",
         [authorization()],
         Body,
         ?HTTP_TIMEOUT
-    ),
-    {ok, {{200, _}, _, Json}} = Res,
-    {ok, #subscription{obj = jiffy:decode(Json)}}.
+    )).
 
 charges(CustomerId) ->
     charges(CustomerId, 0, []).
@@ -112,7 +124,7 @@ charges(CustomerId) ->
 charges(CustomerId, Offset, Acc) ->
     Params = binary_to_list(form_urlencode([
         {<<"customer">>, CustomerId},
-        {<<"count">>, 100},
+        {<<"count">>, ?CHARGES_PAGE_SIZE},
         {<<"offset">>, Offset}
     ])),
     Res = lhttpc:request(
@@ -121,13 +133,17 @@ charges(CustomerId, Offset, Acc) ->
         [authorization()],
         ?HTTP_TIMEOUT
     ),
-    {ok, {{200, _}, _, Json}} = Res,
-    Charges = jsonq:q([<<"data">>], jiffy:decode(Json)),
-    case Charges of
-        [] ->
-            {ok, Acc};
-        Charges ->
-            charges(CustomerId, Offset + 100, Acc ++ Charges)
+    case Res of
+        {ok, {{200, _}, _, Json}} ->
+            Charges = jsonq:q([<<"data">>], jiffy:decode(Json)),
+            case Charges of
+                [] ->
+                    {ok, Acc};
+                Charges ->
+                    charges(CustomerId, Offset + ?CHARGES_PAGE_SIZE, Acc ++ Charges)
+            end;
+        {error, Error} ->
+            {error, Error}
     end.
 
 last_charge(CustomerId) ->
@@ -139,57 +155,61 @@ last_charge(CustomerId) ->
             {ok, lists:last(Charges)}
     end.
 
+handle_refund_response({ok, {{200, _}, _, Json}}) ->
+    {ok, jiffy:decode(Json)};
+handle_refund_response({error, Error}) ->
+    {error, Error}.
+
 issue_refund(ChargeId) ->
-    Res = lhttpc:request(
+    handle_refund_response(lhttpc:request(
         "https://api.stripe.com/v1/charges/" ++ binary_to_list(ChargeId) ++ "/refund",
         "POST",
         [authorization()],
         ?HTTP_TIMEOUT
-    ),
-    {ok, {{200, _}, _, Json}} = Res,
-    {ok, jiffy:decode(Json)}.
+    )).
 
 issue_refund(ChargeId, RefundAmount) ->
     Body = form_urlencode([
         {<<"amount">>, RefundAmount}
     ]),
-    Res = lhttpc:request(
+    handle_refund_response(lhttpc:request(
         "https://api.stripe.com/v1/charges/" ++ binary_to_list(ChargeId) ++ "/refund",
         "POST",
         [authorization()],
         Body,
         ?HTTP_TIMEOUT
-    ),
-    {ok, {{200, _}, _, Json}} = Res,
-    {ok, jiffy:decode(Json)}.
+    )).
+
+handle_invoices_response({ok, {{200, _}, _, Json}}) ->
+    {ok, jsonq:q([<<"data">>], jiffy:decode(Json))};
+handle_invoices_response({error, Error}) ->
+    {error, Error}.
 
 get_invoices() ->
-    get_invoices(1, 100).
-
-get_invoices(Count, Offset) ->
-    get_customer_invoices(<<>>, Count, Offset).
+    get_customer_invoices(<<>>).
 
 get_customer_invoices(CustomerId) ->
-    get_customer_invoices(CustomerId, 1, 100).
-
-get_customer_invoices(CustomerId, Count, Offset) when Count > 0, Count =< 100, Offset >= 0 ->
-    Res = lhttpc:request(
+    handle_invoices_response(lhttpc:request(
         "https://api.stripe.com/v1/invoices/?customer=" ++ binary_to_list(CustomerId),
         "GET",
         [authorization()],
-        5000
-    ),
-    {ok, {{200, _}, _, Json}} = Res,
-    {ok, #invoices{obj = jsonq:q([<<"data">>], jiffy:decode(Json))}}.
+        ?HTTP_TIMEOUT
+    )).
 
-customer_id(#customer{obj = Obj}) ->
+customer_id(Obj) ->
     jsonq:q([<<"id">>], Obj).
 
-active_card(#customer{obj = Obj}) ->
+customer_active_card(Obj) ->
     jsonq:q([<<"active_card">>], Obj).
 
-subscription(#customer{obj = Obj}) ->
+customer_subscription(Obj) ->
     jsonq:q([<<"subscription">>], Obj).
+
+charge_amount(Obj) ->
+    jsonq:q([<<"amount">>], Obj).
+
+charge_id(Obj) ->
+    jsonq:q([<<"id">>], Obj).
 
 form_urlencode(Proplist) ->
     form_urlencode(Proplist, []).
