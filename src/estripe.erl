@@ -3,7 +3,7 @@
 -export([create_customer/3]).
 -export([update_customer/2]).
 -export([delete_customer/1]).
--export([get_customer/1]).
+-export([get_customer/1, get_customer/2]).
 -export([update_subscription/3, update_subscription/4]).
 -export([cancel_subscription/1]).
 
@@ -24,9 +24,12 @@
 -define(HTTP_TIMEOUT, 10000).
 -define(CHARGES_PAGE_SIZE, 100).
 
+authorization(StripeKey) ->
+    {<<"Authorization">>, <<"Bearer ", StripeKey/binary>>}.
+
 authorization() ->
-    {ok, SK} = application:get_env(estripe, stripe_key),
-    {<<"Authorization">>, <<"Bearer ", SK/binary>>}.
+    {ok, StripeKey} = application:get_env(estripe, stripe_key),
+    authorization(StripeKey).
 
 handle_customer_response({ok, {{200, _}, _, Json}}) ->
     {ok, jiffy:decode(Json)};
@@ -69,13 +72,17 @@ delete_customer(CustomerId) when is_binary(CustomerId) ->
         ?HTTP_TIMEOUT
     )).
 
-get_customer(CustomerId) when is_binary(CustomerId) ->
+get_customer(CustomerId, StripeKey) ->
     handle_customer_response(lhttpc:request(
         "https://api.stripe.com/v1/customers/" ++ binary_to_list(CustomerId),
         "GET",
-        [authorization()],
+        [authorization(StripeKey)],
         ?HTTP_TIMEOUT
     )).
+
+get_customer(CustomerId) when is_binary(CustomerId) ->
+    {ok, StripeKey} = application:get_env(estripe, stripe_key),
+    get_customer(CustomerId, StripeKey).
 
 handle_subscription_response({ok, {{200, _}, _, Json}}) ->
     {ok, jiffy:decode(Json)};
