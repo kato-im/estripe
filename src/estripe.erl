@@ -14,6 +14,8 @@
 -export([get_invoices/0]).
 -export([get_customer_invoices/1]).
 
+-export([account/0, account/1]).
+
 -export([customer_id/1]).
 -export([customer_active_card/1]).
 -export([customer_subscription/1]).
@@ -36,6 +38,11 @@ handle_customer_response({ok, {{200, _}, _, Json}}) ->
 handle_customer_response({ok, {{402, "Payment Required"}, _, _}}) ->
     {error, payment_required};
 handle_customer_response({error, Error}) ->
+    {error, Error}.
+
+handle_account_response({ok, {{200, _}, _, Json}}) ->
+    {ok, jiffy:decode(Json)};
+handle_account_response({error, Error}) ->
     {error, Error}.
 
 create_customer(Token, PlanId, Quantity) ->
@@ -124,6 +131,18 @@ cancel_subscription(CustomerId) ->
         Body,
         ?HTTP_TIMEOUT
     )).
+
+account(StripeKey) ->
+    handle_account_response(lhttpc:request(
+        "https://api.stripe.com/v1/account",
+        "GET",
+        [authorization(StripeKey)],
+        ?HTTP_TIMEOUT
+    )).
+
+account() ->
+    {ok, StripeKey} = application:get_env(estripe, stripe_key),
+    account(StripeKey).
 
 charges(CustomerId) ->
     charges(CustomerId, 0, []).
