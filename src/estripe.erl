@@ -1,6 +1,9 @@
 -module(estripe).
 
--export([create_customer/3]).
+-export([
+    create_customer/1,
+    create_customer/3
+]).
 -export([update_customer/2]).
 -export([delete_customer/1]).
 -export([get_customer/1, get_customer/2]).
@@ -45,13 +48,9 @@ handle_account_response({ok, {{200, _}, _, Json}}) ->
 handle_account_response({error, Error}) ->
     {error, Error}.
 
-create_customer(Token, PlanId, Quantity) ->
-    Params = [
-        {<<"card">>, Token},
-        {<<"plan">>, PlanId},
-        {<<"quantity">>, list_to_binary(integer_to_list(Quantity))}
-    ],
-    Body = form_urlencode(Params),
+create_customer(Params) ->
+    C = fun anything_to_utf8_binary/1,
+    Body = form_urlencode([{C(K), C(V)} || {K, V} <- Params]),
     handle_customer_response(lhttpc:request(
         "https://api.stripe.com/v1/customers",
         "POST",
@@ -59,6 +58,38 @@ create_customer(Token, PlanId, Quantity) ->
         Body,
         ?HTTP_TIMEOUT
     )).
+
+create_customer(Token, PlanId, Quantity) ->
+    Params = [
+        {<<"card">>, Token},
+        {<<"plan">>, PlanId},
+        {<<"quantity">>, Quantity}
+    ],
+    create_customer(Params).
+
+anything_to_utf8_binary(Binary) when is_binary(Binary) ->
+    Binary;
+anything_to_utf8_binary(Term) ->
+    unicode:characters_to_binary(anything_to_string(Term)).
+
+anything_to_string(Atom) when is_atom(Atom) ->
+    unicode:characters_to_binary(erlang:atom_to_list(Atom));
+anything_to_string(String) when is_list(String) ->
+    unicode:characters_to_binary(String);
+anything_to_string(Integer) when is_integer(Integer) ->
+    erlang:integer_to_list(Integer);
+anything_to_string(Float) when is_float(Float) ->
+    erlang:float_to_list(Float, [{decimals, 10}, compact]);
+anything_to_string(Binary) when is_binary(Binary) ->
+    unicode:characters_to_list(Binary);
+anything_to_string(Term) ->
+    unicode:characters_to_list(
+        erlang:iolist_to_binary(
+            io_lib:format("~p", [Term])
+        )
+    ).
+
+
 
 update_customer(CustomerId, Token) when is_binary(CustomerId) ->
     Params = [{<<"card">>, Token}],
