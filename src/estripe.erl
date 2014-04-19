@@ -36,8 +36,11 @@ authorization() ->
     {ok, StripeKey} = application:get_env(estripe, stripe_key),
     authorization(StripeKey).
 
+
 handle_customer_response({ok, {{200, _}, _, Json}}) ->
     {ok, jiffy:decode(Json)};
+handle_customer_response({ok, {{400, "Bad Request"}, _, _}}) ->
+    {error, bad_request};
 handle_customer_response({ok, {{402, "Payment Required"}, _, _}}) ->
     {error, payment_required};
 handle_customer_response({error, Error}) ->
