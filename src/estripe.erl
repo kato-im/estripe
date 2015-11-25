@@ -1,6 +1,6 @@
 -module(estripe).
 
--export([create_customer/3]).
+-export([create_customer/3, create_customer/1, create_customer/4]).
 -export([update_customer/2]).
 -export([delete_customer/1]).
 -export([get_customer/1, get_customer/2]).
@@ -51,6 +51,17 @@ create_customer(Token, PlanId, Quantity) ->
         {<<"plan">>, PlanId},
         {<<"quantity">>, list_to_binary(integer_to_list(Quantity))}
     ],
+    create_customer(Params).
+    
+create_customer(Token, PlanId, Quantity, AdditionalParams) ->
+    Params = [
+        {<<"card">>, Token},
+        {<<"plan">>, PlanId},
+        {<<"quantity">>, list_to_binary(integer_to_list(Quantity))} | AdditionalParams
+    ],
+    create_customer(Params).
+
+create_customer(Params) ->
     Body = form_urlencode(Params),
     handle_customer_response(lhttpc:request(
         "https://api.stripe.com/v1/customers",
